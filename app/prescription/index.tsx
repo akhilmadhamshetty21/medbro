@@ -102,8 +102,12 @@ export default function PrescriptionScreen() {
       }));
       const saved = await addPrescription(medicines, uri);
       setExpandedId(saved.id);
-    } catch (e: any) {
-      Alert.alert('Analysis Failed', e.message ?? 'Could not read prescription. Try a clearer photo or enter manually.');
+    } catch {
+      // AI analysis failed — still save the image so the user can add medicines manually
+      const saved = await addPrescription([], uri);
+      setExpandedId(saved.id);
+      setAddingToId(saved.id);
+      setFormVisible(true);
     } finally {
       setAnalyzing(false);
     }
