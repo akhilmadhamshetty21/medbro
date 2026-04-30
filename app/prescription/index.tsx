@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { requestCameraPermission, requestGalleryPermission } from '../../hooks/useMediaPermissions';
 import { analyzePrescription } from '../../services/ai';
 import {
@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
-import { usePrescriptions, type Medicine, type Prescription } from '../../hooks/usePrescriptions';
+import { usePrescriptions, type Medicine } from '../../hooks/usePrescriptions';
 
 const FREQUENCIES = ['Once daily', 'Twice daily', 'Thrice daily', 'Every 6 hours', 'As needed'];
 
@@ -32,10 +32,9 @@ export default function PrescriptionScreen() {
   } = usePrescriptions();
 
   const [mode, setMode] = useState<Mode>('list');
-  const [activePrescription, setActivePrescription] = useState<Prescription | null>(null);
+  const [activePrescriptionId, setActivePrescriptionId] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [remindersEnabled, setRemindersEnabled] = useState(false);
-
   const [manualEntry, setManualEntry] = useState<Omit<Medicine, 'id'>>({
     medicine: '',
     dosage: '',
@@ -43,6 +42,16 @@ export default function PrescriptionScreen() {
     times: 'Morning',
     duration: '7 days',
   });
+
+  // Always derive detail from live prescriptions state using the ID
+  const detail = prescriptions.find((p) => p.id === activePrescriptionId) ?? null;
+
+  // If somehow we end up in detail mode with no matching prescription, go back to list
+  useEffect(() => {
+    if (mode === 'detail' && !loading && !detail) {
+      setMode('list');
+    }
+  }, [mode, detail, loading]);
 
   // ─── Scan ──────────────────────────────────────────────────────────────────
 
@@ -71,7 +80,7 @@ export default function PrescriptionScreen() {
         duration: m.duration,
       }));
       const saved = await addPrescription(medicines, uri);
-      setActivePrescription(saved);
+      setActivePrescriptionId(saved.id);
       setMode('detail');
     } catch (e: any) {
       Alert.alert('Analysis Failed', e.message ?? 'Could not read prescription. Try a clearer photo or enter manually.');
@@ -89,18 +98,14 @@ export default function PrescriptionScreen() {
     }
     const medicine: Medicine = { ...manualEntry, id: Date.now().toString() };
 
-    if (activePrescription) {
-      await addMedicineToPrescription(activePrescription.id, medicine);
-      setActivePrescription((prev) =>
-        prev ? { ...prev, medicines: [...prev.medicines, medicine] } : prev
-      );
+    if (activePrescriptionId) {
+      await addMedicineToPrescription(activePrescriptionId, medicine);
     } else {
       const saved = await addPrescription([medicine]);
-      setActivePrescription(saved);
+      setActivePrescriptionId(saved.id);
     }
 
     setManualEntry({ medicine: '', dosage: '', frequency: FREQUENCIES[0], times: 'Morning', duration: '7 days' });
-    Alert.alert('Saved', `${manualEntry.medicine} added to your prescription.`);
     setMode('detail');
   }
 
@@ -110,7 +115,7 @@ export default function PrescriptionScreen() {
       {
         text: 'Delete', style: 'destructive', onPress: async () => {
           await deletePrescription(id);
-          setActivePrescription(null);
+          setActivePrescriptionId(null);
           setMode('list');
         },
       },
@@ -127,10 +132,16 @@ export default function PrescriptionScreen() {
           <Text style={styles.pageSubtitle}>Your saved prescriptions and medicine schedules.</Text>
 
           <View style={styles.actionRow}>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: Colors.primary }]} onPress={() => { setActivePrescription(null); setMode('scan'); }}>
+            <TouchableOpacity
+              style={[styles.actionBtn, { backgroundColor: Colors.primary }]}
+              onPress={() => { setActivePrescriptionId(null); setMode('scan'); }}
+            >
               <Text style={styles.actionBtnText}>📷  Scan</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: Colors.primaryLight, borderWidth: 1, borderColor: Colors.primary + '40' }]} onPress={() => { setActivePrescription(null); setMode('manual'); }}>
+            <TouchableOpacity
+              style={[styles.actionBtn, { backgroundColor: Colors.primaryLight, borderWidth: 1, borderColor: Colors.primary + '40' }]}
+              onPress={() => { setActivePrescriptionId(null); setMode('manual'); }}
+            >
               <Text style={[styles.actionBtnText, { color: Colors.primary }]}>✏️  Manual</Text>
             </TouchableOpacity>
           </View>
@@ -148,7 +159,7 @@ export default function PrescriptionScreen() {
               <TouchableOpacity
                 key={p.id}
                 style={styles.prescriptionCard}
-                onPress={() => { setActivePrescription(p); setMode('detail'); }}
+                onPress={() => { setActivePrescriptionId(p.id); setMode('detail'); }}
                 activeOpacity={0.8}
               >
                 <View style={styles.prescriptionCardRow}>
@@ -219,27 +230,38 @@ export default function PrescriptionScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <ScrollView contentContainerStyle={styles.content}>
-          <TouchableOpacity onPress={() => setMode(activePrescription ? 'detail' : 'list')} style={styles.back}>
+          <TouchableOpacity onPress={() => setMode(activePrescriptionId ? 'detail' : 'list')} style={styles.back}>
             <Text style={styles.backText}>← Back</Text>
           </TouchableOpacity>
           <Text style={styles.pageTitle}>✏️ Add Medicine</Text>
 
           <View style={styles.formGroup}>
             <Text style={styles.label}>Medicine Name *</Text>
-            <TextInput style={styles.input} placeholder="e.g. Paracetamol" value={manualEntry.medicine}
-              onChangeText={(v) => setManualEntry((p) => ({ ...p, medicine: v }))} />
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Paracetamol"
+              value={manualEntry.medicine}
+              onChangeText={(v) => setManualEntry((p) => ({ ...p, medicine: v }))}
+            />
           </View>
           <View style={styles.formGroup}>
             <Text style={styles.label}>Dosage</Text>
-            <TextInput style={styles.input} placeholder="e.g. 500mg" value={manualEntry.dosage}
-              onChangeText={(v) => setManualEntry((p) => ({ ...p, dosage: v }))} />
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 500mg"
+              value={manualEntry.dosage}
+              onChangeText={(v) => setManualEntry((p) => ({ ...p, dosage: v }))}
+            />
           </View>
           <View style={styles.formGroup}>
             <Text style={styles.label}>Frequency</Text>
             <View style={styles.chips}>
               {FREQUENCIES.map((f) => (
-                <TouchableOpacity key={f} style={[styles.chip, manualEntry.frequency === f && styles.chipActive]}
-                  onPress={() => setManualEntry((p) => ({ ...p, frequency: f }))}>
+                <TouchableOpacity
+                  key={f}
+                  style={[styles.chip, manualEntry.frequency === f && styles.chipActive]}
+                  onPress={() => setManualEntry((p) => ({ ...p, frequency: f }))}
+                >
                   <Text style={[styles.chipText, manualEntry.frequency === f && styles.chipTextActive]}>{f}</Text>
                 </TouchableOpacity>
               ))}
@@ -247,13 +269,21 @@ export default function PrescriptionScreen() {
           </View>
           <View style={styles.formGroup}>
             <Text style={styles.label}>When to take</Text>
-            <TextInput style={styles.input} placeholder="e.g. After meals / Morning" value={manualEntry.times}
-              onChangeText={(v) => setManualEntry((p) => ({ ...p, times: v }))} />
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. After meals / Morning"
+              value={manualEntry.times}
+              onChangeText={(v) => setManualEntry((p) => ({ ...p, times: v }))}
+            />
           </View>
           <View style={styles.formGroup}>
             <Text style={styles.label}>Duration</Text>
-            <TextInput style={styles.input} placeholder="e.g. 7 days" value={manualEntry.duration}
-              onChangeText={(v) => setManualEntry((p) => ({ ...p, duration: v }))} />
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 7 days"
+              value={manualEntry.duration}
+              onChangeText={(v) => setManualEntry((p) => ({ ...p, duration: v }))}
+            />
           </View>
 
           <TouchableOpacity style={styles.primaryBtn} onPress={handleAddManual}>
@@ -266,11 +296,7 @@ export default function PrescriptionScreen() {
 
   // ─── Detail View ───────────────────────────────────────────────────────────
 
-  const detail = activePrescription
-    ? prescriptions.find((p) => p.id === activePrescription.id) ?? activePrescription
-    : null;
-
-  if (!detail) { setMode('list'); return null; }
+  if (!detail) return null;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -297,13 +323,17 @@ export default function PrescriptionScreen() {
 
         <View style={styles.reminderRow}>
           <Text style={styles.reminderLabel}>Enable reminders</Text>
-          <Switch value={remindersEnabled} onValueChange={setRemindersEnabled}
-            trackColor={{ false: Colors.border, true: Colors.primary }} thumbColor={Colors.white} />
+          <Switch
+            value={remindersEnabled}
+            onValueChange={setRemindersEnabled}
+            trackColor={{ false: Colors.border, true: Colors.primary }}
+            thumbColor={Colors.white}
+          />
         </View>
 
         {detail.medicines.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>No medicines added yet.</Text>
+            <Text style={styles.emptyText}>No medicines added yet. Tap below to add one.</Text>
           </View>
         ) : (
           detail.medicines.map((entry) => (
@@ -356,12 +386,8 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 18, fontWeight: '700', color: Colors.textPrimary, marginBottom: 6 },
   emptyText: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', lineHeight: 20 },
   prescriptionCard: {
-    backgroundColor: Colors.white,
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    backgroundColor: Colors.white, borderRadius: 16, padding: 14,
+    marginBottom: 12, borderWidth: 1, borderColor: Colors.border,
   },
   prescriptionCardRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   prescriptionThumb: { width: 56, height: 56, borderRadius: 10, backgroundColor: Colors.border },
