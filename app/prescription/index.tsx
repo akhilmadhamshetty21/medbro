@@ -92,18 +92,24 @@ export default function PrescriptionScreen() {
     setAnalyzing(true);
     try {
       const result = await analyzePrescription(uri);
-      const medicines: Medicine[] = result.medicines.map((m, i) => ({
-        id: String(Date.now() + i),
-        medicine: m.name,
-        dosage: m.dosage,
-        frequency: m.frequency,
-        times: m.instructions,
-        duration: m.duration,
-      }));
+      const medicines: Medicine[] = result.medicines
+        .filter((m) => m.name?.trim())
+        .map((m, i) => ({
+          id: String(Date.now() + i),
+          medicine: m.name,
+          dosage: m.dosage,
+          frequency: m.frequency,
+          times: m.instructions,
+          duration: m.duration,
+        }));
       const saved = await addPrescription(medicines, uri);
       setExpandedId(saved.id);
-    } catch {
-      // AI analysis failed — still save the image so the user can add medicines manually
+      if (medicines.length === 0) {
+        setAddingToId(saved.id);
+        setFormVisible(true);
+      }
+    } catch (e: any) {
+      // AI failed — save image anyway and let user add medicines manually
       const saved = await addPrescription([], uri);
       setExpandedId(saved.id);
       setAddingToId(saved.id);

@@ -10,10 +10,16 @@ function getClient() {
   return new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
 }
 
-/** Convert a local file URI to base64 string */
 async function uriToBase64(uri: string): Promise<string> {
-  const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-  return base64;
+  return FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+}
+
+function getMediaType(uri: string): 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' {
+  const u = uri.toLowerCase().split('?')[0];
+  if (u.endsWith('.png')) return 'image/png';
+  if (u.endsWith('.gif')) return 'image/gif';
+  if (u.endsWith('.webp')) return 'image/webp';
+  return 'image/jpeg';
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -52,26 +58,49 @@ export interface MedicineInfoResult {
 export async function analyzePrescription(imageUri: string): Promise<PrescriptionAnalysisResult> {
   const client = getClient();
   const base64 = await uriToBase64(imageUri);
+  const mediaType = getMediaType(imageUri);
 
-  const response = await client.messages.create({
+  // Step 1: OCR — ask Claude vision to transcribe all text in the image
+  const ocrResponse = await client.messages.create({
     model: MODEL_VISION,
-    max_tokens: 1024,
+    max_tokens: 2048,
     messages: [
       {
         role: 'user',
         content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: 'image/jpeg', data: base64 },
-          },
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
           {
             type: 'text',
-            text: `You are a medical assistant reading a prescription. Extract all medicines and return ONLY a JSON object in this exact format, with no extra text:
+            text: 'Transcribe ALL text visible in this image exactly as written. Include medicine names, dosages, frequencies, instructions, dates, doctor notes — everything. Do not summarize or skip anything.',
+          },
+        ],
+      },
+    ],
+  });
+
+  const rawText = ocrResponse.content[0].type === 'text' ? ocrResponse.content[0].text.trim() : '';
+  if (!rawText) throw new Error('Could not read text from image — try a clearer photo');
+
+  // Step 2: Parse — use a text model to structure the OCR output into medicines
+  const parseResponse = await client.messages.create({
+    model: MODEL_CHAT,
+    max_tokens: 2048,
+    messages: [
+      {
+        role: 'user',
+        content: `You are a pharmacist. Extract all medicines from this prescription text and return ONLY valid JSON — no explanation, no markdown.
+
+Prescription text:
+"""
+${rawText}
+"""
+
+Return this exact JSON format:
 {
-  "rawText": "<full text you read from the prescription>",
+  "rawText": "copy the full prescription text here",
   "medicines": [
     {
-      "name": "Medicine name",
+      "name": "medicine brand/generic name",
       "dosage": "e.g. 500mg",
       "frequency": "e.g. Twice daily",
       "duration": "e.g. 7 days",
@@ -79,16 +108,19 @@ export async function analyzePrescription(imageUri: string): Promise<Prescriptio
     }
   ]
 }
-If you cannot read a field clearly, use an empty string. Return only valid JSON.`,
-          },
-        ],
+
+Rules:
+- Include every medicine mentioned, even vitamins and supplements
+- If a field is not mentioned, use an empty string
+- If no medicines found, use an empty array
+- Return ONLY the JSON object, nothing else`,
       },
     ],
   });
 
-  const text = response.content[0].type === 'text' ? response.content[0].text : '';
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('Could not parse prescription — try a clearer photo');
+  const parseText = parseResponse.content[0].type === 'text' ? parseResponse.content[0].text : '';
+  const jsonMatch = parseText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Could not structure prescription data');
   return JSON.parse(jsonMatch[0]) as PrescriptionAnalysisResult;
 }
 
@@ -101,6 +133,7 @@ If you cannot read a field clearly, use an empty string. Return only valid JSON.
 export async function identifyMedicine(imageUri: string): Promise<MedicineInfoResult> {
   const client = getClient();
   const base64 = await uriToBase64(imageUri);
+  const mediaType = getMediaType(imageUri);
 
   // Step 1: Identify the medicine name from the image
   const identifyResponse = await client.messages.create({
@@ -112,7 +145,7 @@ export async function identifyMedicine(imageUri: string): Promise<MedicineInfoRe
         content: [
           {
             type: 'image',
-            source: { type: 'base64', media_type: 'image/jpeg', data: base64 },
+            source: { type: 'base64', media_type: mediaType, data: base64 },
           },
           {
             type: 'text',
