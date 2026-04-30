@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { requestCameraPermission, requestGalleryPermission } from '../../hooks/useMediaPermissions';
 import { analyzePrescription } from '../../services/ai';
 import {
@@ -45,13 +45,6 @@ export default function PrescriptionScreen() {
 
   // Always derive detail from live prescriptions state using the ID
   const detail = prescriptions.find((p) => p.id === activePrescriptionId) ?? null;
-
-  // If somehow we end up in detail mode with no matching prescription, go back to list
-  useEffect(() => {
-    if (mode === 'detail' && !loading && !detail) {
-      setMode('list');
-    }
-  }, [mode, detail, loading]);
 
   // ─── Scan ──────────────────────────────────────────────────────────────────
 
@@ -296,7 +289,18 @@ export default function PrescriptionScreen() {
 
   // ─── Detail View ───────────────────────────────────────────────────────────
 
-  if (!detail) return null;
+  if (!detail) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.content}>
+          <TouchableOpacity onPress={() => setMode('list')} style={styles.back}>
+            <Text style={styles.backText}>← All Prescriptions</Text>
+          </TouchableOpacity>
+          <Text style={styles.emptyText}>Loading...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
