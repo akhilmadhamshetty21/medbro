@@ -89,17 +89,22 @@ export default function PrescriptionScreen() {
       Alert.alert('Required', 'Please enter the medicine name.');
       return;
     }
-    const medicine: Medicine = { ...manualEntry, id: Date.now().toString() };
+    try {
+      const medicine: Medicine = { ...manualEntry, id: Date.now().toString() };
 
-    if (activePrescriptionId) {
-      await addMedicineToPrescription(activePrescriptionId, medicine);
-    } else {
-      const saved = await addPrescription([medicine]);
-      setActivePrescriptionId(saved.id);
+      if (activePrescriptionId) {
+        await addMedicineToPrescription(activePrescriptionId, medicine);
+        setManualEntry({ medicine: '', dosage: '', frequency: FREQUENCIES[0], times: 'Morning', duration: '7 days' });
+        setMode('detail');
+      } else {
+        const saved = await addPrescription([medicine]);
+        setManualEntry({ medicine: '', dosage: '', frequency: FREQUENCIES[0], times: 'Morning', duration: '7 days' });
+        setActivePrescriptionId(saved.id);
+        setMode('detail');
+      }
+    } catch (e: any) {
+      Alert.alert('Save Failed', e?.message ?? 'Something went wrong. Please try again.');
     }
-
-    setManualEntry({ medicine: '', dosage: '', frequency: FREQUENCIES[0], times: 'Morning', duration: '7 days' });
-    setMode('detail');
   }
 
   async function handleDelete(id: string) {
